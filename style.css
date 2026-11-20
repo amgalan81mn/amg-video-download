@@ -22,7 +22,8 @@ h1 { font-size: 15px; margin: 0; color: #dc2626; }
   flex: 1; padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 6px; font: inherit;
 }
 .toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; }
-.toolbar label { display: flex; align-items: center; gap: 4px; flex: 1; }
+.toolbar label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.toolbar button.primary { flex: 1; width: auto; padding: 6px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 select, button {
   font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff; cursor: pointer;
 }
@@ -54,7 +55,7 @@ body.window #list { max-height: none; }
 footer { padding: 10px 12px; background: #fff; border-top: 1px solid #e5e7eb; }
 .bar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin: 6px 0 12px; }
 .bar > div { height: 100%; width: 0; background: #dc2626; transition: width .2s; }
-.settings { margin-bottom: 8px; }
+.settings { margin-bottom: 0; }
 .settings summary { cursor: pointer; color: #374151; font-size: 12px; padding: 2px 0 6px; }
 .settings summary b { font-weight: 600; color: #111827; }
 .settings .row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
