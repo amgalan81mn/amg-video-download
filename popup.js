@@ -572,7 +572,8 @@ function addMerged(list) {
         merge: true,
         audioUrl: audio.url,
         hasAudio: true,
-        size: (v.size || 0) + (audio.size || 0),
+        // Хоёулангийнх нь хэмжээ мэдэгдэж байвал л нийлбэрийг харуулна (эс бөгөөс буруу бага тоо гарна)
+        size: v.size && audio.size ? v.size + audio.size : 0,
         label: '',
         quality: isAv1(v) ? `${v.quality || `${v.qh}p`} AV1` : v.quality,
       }));

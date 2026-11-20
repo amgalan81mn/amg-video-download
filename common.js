@@ -298,10 +298,17 @@ const AMG = (() => {
       // reels гүйлгэхэд fbcap.js-ийн барьж авсан GraphQL хариу (#__amg_cap) хоёуланд байна.
       // Эхлээд <Representation>-ий шинжтэй хамт: кодек (av01/vp09/avc1), өргөн, өндөр, чанарын нэр.
       // "q90" гэх мэт кодлолын нэр видео бүрт өөр нягтралтай байдаг тул холбоостой нь хамт авна.
-      const cre = /codecs=\\?"([^"\\]+)\\?"[^>]*?FBEncodingTag=\\?"([^"\\]+)\\?"[^>]*?width=\\?"(\d+)\\?"\s+height=\\?"(\d+)\\?"[^>]*?FBQualityLabel=\\?"([^"\\]+)\\?"[^>]*>[\s\S]{0,3000}?BaseURL(?:>|&gt;)(https?:(?:\\\/|[^\\<"\s])+)/g;
+      // Холбоос дотор JSON escape (\u0025 = %, \u0026 = & гэх мэт) байж болно. Түүн дээр тасалбал
+      // холбоос дутуу болж 403 өгдөг тул escape-ийг холбоосны нэг хэсэг гэж үзээд дараа нь тайлна.
+      // \u003C (<) нь BaseURL-ийн төгсгөл.
+      const decodeUrl = (s) => s
+        .replace(/\x5cu([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+        .replace(/\\\//g, '/')
+        .replace(/&amp;/g, '&');
+      const cre = /codecs=\\?"([^"\\]+)\\?"[^>]*?FBEncodingTag=\\?"([^"\\]+)\\?"[^>]*?width=\\?"(\d+)\\?"\s+height=\\?"(\d+)\\?"[^>]*?FBQualityLabel=\\?"([^"\\]+)\\?"[^>]*>[\s\S]{0,3000}?BaseURL(?:>|&gt;)(https?:(?:\\\/|\x5cu(?!003[cC])[0-9a-fA-F]{4}|[^\\<"\s])+)/g;
       count = 0;
       while ((m = cre.exec(html)) && count < 1500) {
-        const u = m[6].replace(/\\\//g, '/').replace(/&amp;/g, '&');
+        const u = decodeUrl(m[6]);
         // FBContentLength байвал файлын хэмжээ
         const len = (m[0].match(/FBContentLength=\\?"(\d+)/) || [])[1];
         add(u, {
@@ -311,10 +318,10 @@ const AMG = (() => {
         count++;
       }
       // Үлдсэн нь (тусдаа дуу гэх мэт)
-      const bre = /BaseURL(?:>|&gt;)(https?:(?:\\\/|[^\\<"\s])+)/g;
+      const bre = /BaseURL(?:>|&gt;)(https?:(?:\\\/|\x5cu(?!003[cC])[0-9a-fA-F]{4}|[^\\<"\s])+)/g;
       count = 0;
       while ((m = bre.exec(html)) && count < 1500) {
-        const u = m[1].replace(/\\\//g, '/').replace(/&amp;/g, '&');
+        const u = decodeUrl(m[1]);
         add(u, { label: 'dash', source: 'json', igCode: codeAt(m.index) });
         count++;
       }
