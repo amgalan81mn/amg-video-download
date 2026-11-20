@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+  <meta charset="utf-8">
+  <title>Amg-Video-Download</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon32.png" alt="">
+    <h1>Amg-Video-Download</h1>
+    <span id="pageTitle" class="muted"></span>
+  </header>
+
+  <section class="linkbox">
+    <input id="linkInput" type="url" placeholder="Видео / хуудасны линк буулгах (Ctrl+V)">
+    <button id="linkBtn">Хайх</button>
+  </section>
+
+  <section class="toolbar">
+    <label><input type="checkbox" id="selectAll"> Бүгд</label>
+    <select id="format">
+      <option value="orig">MP4 / эх формат</option>
+      <option value="mp3">MP3 (аудио)</option>
+    </select>
+    <button id="refreshBtn" title="Дахин хайх">⟳</button>
+  </section>
+
+  <div id="status" class="status"></div>
+  <ul id="list"></ul>
+
+  <footer>
+    <button id="downloadBtn" class="primary" disabled>Сонгосныг татах</button>
+  </footer>
+
+  <script src="common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
