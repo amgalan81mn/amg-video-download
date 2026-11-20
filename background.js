@@ -120,6 +120,15 @@ async function startJob(job) {
   });
 }
 
+// ---------- Гарын товчлол ----------
+// Alt+Shift+D: жагсаалтын цонхыг "auto" горимоор нээнэ. Тэр нь шилдэг видеог өөрөө сонгож,
+// ганцхан тодорхой видео байвал шууд татаад хаагдана. Олон бол сонгуулахаар үлдэнэ.
+chrome.commands.onCommand.addListener(async (command, tab) => {
+  if (command !== 'quick-download') return;
+  if (!tab) [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (tab && tab.id != null) openPicker({ tab: tab.id, auto: 1 });
+});
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const tabId = tab ? tab.id : -1;
   const title = (tab && tab.title) || 'amg-video';
@@ -172,6 +181,16 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   return false;
 });
 
+// ---------- Татсан түүх (сүүлийн 100) ----------
+const HISTORY_MAX = 100;
+async function addHistory(d) {
+  const name = (d.filename || '').split(/[\\/]/).pop();
+  const { history = [] } = await chrome.storage.local.get('history');
+  const rest = history.filter((h) => h.id !== d.id);
+  rest.unshift({ id: d.id, name, path: d.filename, size: d.fileSize || d.totalBytes || 0, time: Date.now() });
+  await chrome.storage.local.set({ history: rest.slice(0, HISTORY_MAX) });
+}
+
 // ---------- Хадгалсны дараах мэдэгдэл (видео дүрстэй) ----------
 function notifyError(name, reason) {
   chrome.notifications.create(`err_${Date.now()}`, {
@@ -189,6 +208,7 @@ chrome.downloads.onChanged.addListener(async (delta) => {
   if (!d || d.byExtensionId !== chrome.runtime.id) return;
   const name = (d.filename || '').split(/[\\/]/).pop();
   if (delta.state.current === 'complete') {
+    addHistory(d).catch(() => {});
     chrome.notifications.create(`dl_${d.id}`, {
       type: 'basic',
       iconUrl: 'icons/video128.png',

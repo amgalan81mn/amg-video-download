@@ -1,4 +1,4 @@
-/* global AMG, lamejs */
+/* global AMG, AMG_MUX, lamejs */
 const main = document.getElementById('main');
 const id = new URLSearchParams(location.search).get('id');
 
@@ -67,6 +67,22 @@ async function saveBlob(blob, filename) {
 }
 
 const sleep0 = () => new Promise((r) => setTimeout(r, 0));
+
+// ---------- Дуугүй дүрс + тусдаа дууг нэг MP4 болгох (Facebook 1080p/1440p) ----------
+async function mergeDownload(item, filename, row) {
+  row.step('Дүрсийг татаж байна…');
+  const vBuf = await fetchWithProgress(item.url, (p) => row.pct(p * 0.8));
+  row.step('Дууг татаж байна…');
+  const aBuf = await fetchWithProgress(item.audioUrl, (p) => row.pct(80 + p * 0.15));
+  row.step('Дүрс, дууг нийлүүлж байна…');
+  await sleep0();
+  const out = AMG_MUX.merge(vBuf, aBuf);
+  row.pct(97);
+  row.step('Хадгалж байна…');
+  const ok = await saveBlob(new Blob([out], { type: 'video/mp4' }), filename);
+  row.pct(100);
+  row.step(ok ? `Хадгаллаа ✓ (${AMG.humanSize(out.length)})` : 'Цуцаллаа');
+}
 
 // ---------- Видео/аудиог MP3 болгох ----------
 async function toMp3(item, filename, row) {
@@ -200,15 +216,18 @@ async function hlsDownload(item, title, idx, row) {
     return;
   }
   chrome.storage.session.remove(id);
-  document.title = `Amg-Video-Download — ${job.type === 'mp3' ? 'MP3 болгож байна' : 'HLS татаж байна'}`;
+  const TYPE_LABEL = { mp3: 'MP3', hls: 'HLS', merge: 'Дүрс+дуу' };
+  const TYPE_TITLE = { mp3: 'MP3 болгож байна', hls: 'HLS татаж байна', merge: 'Дүрс, дууг нийлүүлж байна' };
+  document.title = `Amg-Video-Download — ${TYPE_TITLE[job.type] || ''}`;
   const multi = job.items.length > 1;
   let okCount = 0;
   for (let i = 0; i < job.items.length; i++) {
     const it = job.items[i];
-    const label = `${i + 1}. ${job.type === 'mp3' ? 'MP3' : 'HLS'} — ${AMG.safeName(job.title, 60)}`;
+    const label = `${i + 1}. ${TYPE_LABEL[job.type] || ''} — ${AMG.safeName(it.baseName || job.title, 60)}`;
     const row = makeRow(label);
     try {
-      if (job.type === 'mp3') await toMp3(it, AMG.fileName(it.baseName || job.title, 'mp3', it.baseName ? 0 : (multi ? i + 1 : 0)), row);
+      if (job.type === 'merge') await mergeDownload(it, AMG.fileName(it.baseName || job.title, 'mp4', it.baseName ? 0 : (multi ? i + 1 : 0)), row);
+      else if (job.type === 'mp3') await toMp3(it, AMG.fileName(it.baseName || job.title, 'mp3', it.baseName ? 0 : (multi ? i + 1 : 0)), row);
       else await hlsDownload(it, it.baseName || job.title, it.baseName ? 0 : (multi ? i + 1 : 0), row);
       okCount++;
     } catch (e) {

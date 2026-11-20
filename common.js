@@ -205,6 +205,7 @@ const AMG = (() => {
         width: el.videoWidth || 0,
         height: el.videoHeight || 0,
         duration: isFinite(el.duration) ? el.duration : 0,
+        playing: !el.paused && !el.ended,
       };
       add(el.currentSrc || el.src, info);
       el.querySelectorAll('source').forEach((s) => add(s.src, Object.assign({}, info, { mime: s.type || '' })));

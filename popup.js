@@ -36,7 +36,9 @@ let isCurrent = () => false;
 function score(it) {
   // Дуутай видео > дуугүй видео > аудио. Дараа нь чанар (өндөр), bitrate, хэмжээгээр.
   const tier = it.kind === 'audio' ? 0 : (it.hasAudio ? 2 : 1);
-  return [tier, it.qh || 0, it.bitrate || 0, it.size || 0];
+  // Нийлүүлсэн AV1 хувилбар Windows-ийн зарим тоглуулагчид тоглохгүй тул шилдэг болгохгүй
+  const compat = it.merge && /av1/i.test(it.encTag || '') ? 0 : 1;
+  return [tier, compat, it.qh || 0, it.bitrate || 0, it.size || 0];
 }
 function cmpScore(a, b) {
   const x = score(a);
@@ -62,8 +64,9 @@ function buildGroups() {
     return { best: usable[0], variants: vs.concat(rest) };
   });
   // Одоо нээлттэй байгаа видео (хаягт нь video_id байвал) хамгийн дээр
+  // эсвэл хуудсан дээр яг одоо тоглож байгаа видео (Instagram, TikTok гэх мэт)
   isCurrent = (g) => [g.best].concat(g.variants)
-    .some((i) => items[i].videoId && pageUrl.includes(items[i].videoId));
+    .some((i) => (items[i].videoId && pageUrl.includes(items[i].videoId)) || items[i].playing);
   const order = { video: 0, audio: 1, hls: 2, dash: 3, blob: 4 };
   groups.sort((a, b) => (isCurrent(b) - isCurrent(a)) || (order[items[a.best].kind] - order[items[b.best].kind])
     || ((items[b.best].size || 0) - (items[a.best].size || 0)));
@@ -71,9 +74,28 @@ function buildGroups() {
 }
 
 // Видеоны ID: Facebook-ийн холбоосноос, эсвэл ганц видеотой бол хуудасны хаягнаас (reel/123…)
+const PAGE_ID_PATTERNS = [
+  // Facebook: /reel/123…, /videos/123…, watch/?v=123…
+  /facebook\.com\/(?:.*\/)?(?:reel|reels|videos|watch)\/(?:\?v=)?(\d{6,})/,
+  /facebook\.com\/.*[?&]v=(\d{6,})/,
+  // Instagram: /reel/ABC…, /p/ABC…, /tv/ABC… (хэрэглэгчийн нэртэй хаяг ч болно)
+  /instagram\.com\/(?:[^/?#]+\/)?(?:reels?|p|tv)\/([A-Za-z0-9_-]{5,})/,
+  // TikTok: /@user/video/123…
+  /tiktok\.com\/@[^/?#]+\/(?:video|photo)\/(\d{6,})/,
+  /tiktok\.com\/(?:.*\/)?v\/(\d{6,})/,
+  // YouTube: watch?v=…, shorts/…, youtu.be/…
+  /youtube\.com\/(?:shorts|live|embed)\/([A-Za-z0-9_-]{11})/,
+  /youtube\.com\/watch\?(?:.*&)?v=([A-Za-z0-9_-]{11})/,
+  /youtu\.be\/([A-Za-z0-9_-]{11})/,
+  // Бусад: ?v=123…
+  /[?&]v=(\d{6,})/,
+];
 function pageVideoId() {
-  const m = pageUrl.match(/\/(?:reel|reels|videos|watch)\/(?:\?v=)?(\d{6,})/) || pageUrl.match(/[?&]v=(\d{6,})/);
-  return m ? m[1] : '';
+  for (const re of PAGE_ID_PATTERNS) {
+    const m = pageUrl.match(re);
+    if (m) return m[1];
+  }
+  return '';
 }
 function tagGroups() {
   const usableGroups = groups.filter((g) => canDownload(items[g.best]));
@@ -171,7 +193,8 @@ function variantRow(i) {
   const bits = [];
   if (it.size) bits.push(AMG.humanSize(it.size));
   if (it.kind === 'video' && it.mediaKnown && !it.hasAudio) bits.push('🔇 дуугүй');
-  if (it.kind === 'video' && it.hasAudio) bits.push('🔊 дуутай');
+  if (it.merge) bits.push('🔊 дүрс+дуу нийлүүлнэ');
+  else if (it.kind === 'video' && it.hasAudio) bits.push('🔊 дуутай');
   small.textContent = bits.join(' · ');
   row.append(makeCheckbox(i), icon, q, small);
   return row;
@@ -200,7 +223,8 @@ function render() {
     if (q) info.push(q);
     if (it.duration) info.push(fmtDur(it.duration));
     if (it.size) info.push(AMG.humanSize(it.size));
-    if (it.kind === 'video' && it.hasAudio) info.push('🔊 дуутай');
+    if (it.merge) info.push('🔊 дуутай (дүрс+дуу нийлүүлнэ)');
+    else if (it.kind === 'video' && it.hasAudio) info.push('🔊 дуутай');
     else if (it.kind === 'video' && it.mediaKnown) info.push('🔇 дуугүй');
     if (it.label && !it.quality) info.push(it.label);
     info.push(SOURCE_LABEL[it.source] || it.source);
@@ -224,12 +248,93 @@ function render() {
       meta.append(det);
     }
 
+    li.dataset.base = baseNameOf(it, 'orig');
     li.append(cb, makeThumb(it), meta);
     ul.append(li);
   });
   $('selectAll').checked = false;
   updateButton();
+  markDownloaded();
 }
+
+// ---------- Татсан түүх ----------
+let dlHistory = [];
+// "amg-video-download-123 (1).mp4" → "amg-video-download-123"
+const baseOfFile = (name) => String(name || '').replace(/\.[^.]+$/, '').replace(/\s\(\d+\)$/, '');
+
+// Өмнө нь татсан видеоны мөрөнд "✓ Татсан" тэмдэг тавина (давхар татахаас сэргийлнэ)
+function markDownloaded() {
+  const done = new Set(dlHistory.map((h) => baseOfFile(h.name)));
+  document.querySelectorAll('#list li[data-base]').forEach((li) => {
+    const has = done.has(li.dataset.base);
+    let b = li.querySelector('.badge.done');
+    if (has && !b) {
+      b = document.createElement('span');
+      b.className = 'badge done';
+      b.textContent = '✓ Татсан';
+      b.title = 'Энэ видеог өмнө нь татсан байна';
+      const first = li.querySelector('.meta > div');
+      if (first) first.insertBefore(b, first.querySelector('.small'));
+    } else if (!has && b) b.remove();
+  });
+}
+
+function fmtTime(t) {
+  const d = new Date(t);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function renderHistory() {
+  const ul = $('historyList');
+  ul.innerHTML = '';
+  $("historyCount").textContent = dlHistory.length ? `(${dlHistory.length})` : '';
+  $("historyClear").hidden = !dlHistory.length;
+  if (!dlHistory.length) {
+    ul.innerHTML = '<li class="small">Одоогоор татсан файл алга.</li>';
+    return;
+  }
+  dlHistory.slice(0, 30).forEach((h) => {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'hname';
+    name.textContent = h.name;
+    name.title = h.path || h.name;
+    const small = document.createElement('span');
+    small.className = 'small';
+    small.textContent = [fmtTime(h.time), AMG.humanSize(h.size)].filter(Boolean).join(' · ');
+    const show = document.createElement('button');
+    show.textContent = '📂';
+    show.title = 'Хавтсанд харах';
+    show.addEventListener('click', () => chrome.downloads.show(h.id));
+    const open = document.createElement('button');
+    open.textContent = '▶';
+    open.title = 'Нээх';
+    open.addEventListener('click', async () => {
+      const [d] = await chrome.downloads.search({ id: h.id });
+      if (!d || d.exists === false) { setStatus(`Файл олдсонгүй (устгагдсан эсвэл зөөгдсөн): ${h.name}`, true); return; }
+      chrome.downloads.open(h.id);
+    });
+    li.append(name, small, show, open);
+    ul.append(li);
+  });
+}
+
+async function loadHistory() {
+  try {
+    ({ history: dlHistory = [] } = await chrome.storage.local.get('history'));
+  } catch (e) { dlHistory = []; }
+  renderHistory();
+  markDownloaded();
+}
+$('historyClear').addEventListener('click', async () => {
+  await chrome.storage.local.remove('history');
+  dlHistory = [];
+  renderHistory();
+  markDownloaded();
+});
+chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.history) loadHistory(); });
+loadHistory();
 
 function selected() {
   return [...document.querySelectorAll('#list input[type=checkbox]:checked')].map((c) => items[+c.dataset.idx]);
@@ -263,7 +368,7 @@ function normalize(raw, reps) {
     const key = mi.group && mi.tag ? `${mi.group}|${mi.tag}` : url;
     const prev = map.get(key);
     if (prev) {
-      ['width', 'height', 'duration', 'size', 'label', 'mime'].forEach((k) => { if (!prev[k] && r[k]) prev[k] = r[k]; });
+      ['width', 'height', 'duration', 'size', 'label', 'mime', 'playing'].forEach((k) => { if (!prev[k] && r[k]) prev[k] = r[k]; });
       if ((r.size || 0) > (prev.size || 0)) prev.size = r.size;
       return;
     }
@@ -289,7 +394,43 @@ function normalize(raw, reps) {
     if (!it.qh && it.height) it.qh = Math.min(it.width || it.height, it.height);
     map.set(key, it);
   });
-  return [...map.values()];
+  return addMerged([...map.values()]);
+}
+
+// Facebook: өндөр чанарын дүрс нь дуугүй, дуу нь тусдаа ирдэг. Дуутай хувилбараас өндөр чанартай
+// дүрс байвал "дүрс + дуу нийлүүлсэн" хувилбар нэмнэ (татахдаа job цонхонд нийлүүлнэ).
+function addMerged(list) {
+  const byGroup = new Map();
+  list.forEach((it) => {
+    if (!it.group) return;
+    if (!byGroup.has(it.group)) byGroup.set(it.group, []);
+    byGroup.get(it.group).push(it);
+  });
+  byGroup.forEach((arr) => {
+    const audio = arr.filter((x) => x.kind === 'audio').sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0)
+      || (b.size || 0) - (a.size || 0))[0];
+    if (!audio) return;
+    const silent = arr.filter((x) => x.kind === 'video' && x.mediaKnown && !x.hasAudio && x.qh);
+    if (!silent.length) return;
+    const withSound = Math.max(0, ...arr.filter((x) => x.kind === 'video' && x.hasAudio).map((x) => x.qh || 0));
+    // AV1 биш (VP9/H.264) хамгийн өндрийг үндсэн болгоно. AV1 нь илүү өндөр бол нэмэлт сонголт болно.
+    const isAv1 = (x) => /av1/i.test(x.encTag || '');
+    const top = (arr2) => arr2.sort((a, b) => (b.qh - a.qh) || ((b.size || 0) - (a.size || 0)))[0];
+    const plain = top(silent.filter((x) => !isAv1(x)));
+    const av1 = top(silent.filter(isAv1));
+    [plain, av1 && (!plain || av1.qh > plain.qh) ? av1 : null].forEach((v) => {
+      if (!v || v.qh <= withSound) return;
+      list.push(Object.assign({}, v, {
+        merge: true,
+        audioUrl: audio.url,
+        hasAudio: true,
+        size: (v.size || 0) + (audio.size || 0),
+        label: '',
+        quality: isAv1(v) ? `${v.quality || `${v.qh}p`} AV1` : v.quality,
+      }));
+    });
+  });
+  return list;
 }
 
 async function scanTab(tabId) {
@@ -410,10 +551,15 @@ $('downloadBtn').addEventListener('click', async () => {
   const direct = [];
   const mp3Jobs = [];
   const hlsJobs = [];
+  const mergeJobs = [];
   const skipped = [];
 
   sel.forEach((it) => {
-    if (mode === 'mp3') {
+    if (it.merge) {
+      // MP3 бол зөвхөн тусдаа дууг нь хөрвүүлнэ
+      if (mode === 'mp3') mp3Jobs.push(Object.assign({}, it, { url: it.audioUrl, kind: 'audio', merge: false }));
+      else mergeJobs.push(it);
+    } else if (mode === 'mp3') {
       if (it.kind === 'hls') skipped.push(it);
       else if (AMG.extOf(it.url) === 'mp3' || /audio\/mpeg/.test(it.mime || '')) direct.push(it);
       else mp3Jobs.push(it);
@@ -444,11 +590,13 @@ $('downloadBtn').addEventListener('click', async () => {
   const withName = (it) => Object.assign({}, it, { baseName: nameFor(it) });
   if (mp3Jobs.length) await chrome.runtime.sendMessage({ type: 'startJob', job: { type: 'mp3', items: mp3Jobs.map(withName), title: pageTitle } });
   if (hlsJobs.length) await chrome.runtime.sendMessage({ type: 'startJob', job: { type: 'hls', items: hlsJobs.map(withName), title: pageTitle } });
+  if (mergeJobs.length) await chrome.runtime.sendMessage({ type: 'startJob', job: { type: 'merge', items: mergeJobs.map(withName), title: pageTitle } });
 
   const parts = [];
   if (direct.length) parts.push(`${direct.length} файл татагдаж эхэллээ`);
   if (mp3Jobs.length) parts.push(`${mp3Jobs.length} файл MP3 болгох цонхонд шилжлээ`);
   if (hlsJobs.length) parts.push(`${hlsJobs.length} HLS урсгал татах цонхонд шилжлээ`);
+  if (mergeJobs.length) parts.push(`${mergeJobs.length} видеоны дүрс, дууг нийлүүлэх цонхонд шилжлээ`);
   if (skipped.length) parts.push(`${skipped.length} HLS урсгалыг MP3 болгох боломжгүй`);
   setStatus(parts.join('. ') + '.', !!skipped.length && !parts.length);
 });
@@ -478,12 +626,31 @@ $('folderReset').addEventListener('click', () => {
 });
 loadSettingsUI();
 
+// ---------- Гарын товчлол ----------
+// Alt+Shift+D-ээр нээгдсэн бол: ганц тодорхой видео сонгогдсон байвал шууд татаад хаагдана
+function autoDownload() {
+  const sel = selected();
+  if (sel.length === 1) {
+    setStatus('Шилдэг чанараар татаж байна…');
+    $('downloadBtn').click();
+    setTimeout(() => window.close(), 2500);
+  } else if (groups.some((g) => canDownload(items[g.best]))) {
+    setStatus('Олон видео олдлоо. Хэрэгтэйгээ сонгоод Enter дарна уу.');
+  }
+}
+// Enter: сонгосныг татах (линк бичих талбараас бусад үед)
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.target.closest('input[type=text], input[type=url], select, button, summary')) return;
+  if (!$('downloadBtn').disabled) { e.preventDefault(); $('downloadBtn').click(); }
+});
+
 // ---------- Эхлэх ----------
 (async () => {
   if (params.get('url')) {
     loadLink(params.get('url'));
   } else if (params.get('tab')) {
-    loadTab(Number(params.get('tab')));
+    await loadTab(Number(params.get('tab')));
+    if (params.get('auto')) autoDownload();
   } else {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab) loadTab(tab.id);
