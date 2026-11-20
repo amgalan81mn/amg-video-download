@@ -128,8 +128,22 @@ function imageExt(it) {
   return m ? m.toLowerCase() : 'jpg';
 }
 
+// Зургийн өөрийн нэр: холбоосны сүүлийн хэсэг (жишээ нь 901076281_1682…_n.jpg → 901076281_1682…_n)
+function imageOwnName(url) {
+  try {
+    const last = decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || '');
+    const base = AMG.safeName(last.replace(/\.[a-z0-9]{2,5}$/i, ''), 120);
+    // Утгагүй богино нэр (image, photo, 1 гэх мэт) бол хэрэглэхгүй
+    return base && base !== 'amg-video' && base.length >= 4 ? base : '';
+  } catch (e) {
+    return '';
+  }
+}
+
 function baseNameOf(it, mode) {
   if (it.kind === 'image') {
+    const own = imageOwnName(it.url);
+    if (own) return own;
     const id = pageVideoId();
     return `${id ? `amg-video-download-${id}` : pageTitle}-img`;
   }
