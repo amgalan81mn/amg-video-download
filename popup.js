@@ -7,6 +7,7 @@ if (params.get('mode') === 'mp3') $('format').value = 'mp3';
 
 let items = [];
 let pageTitle = 'amg-video';
+let pageThumb = '';
 let currentTabId = null;
 
 function setStatus(text, err) {
@@ -28,9 +29,136 @@ function canDownload(it) {
   return it.kind === 'video' || it.kind === 'audio' || it.kind === 'hls';
 }
 
+// ---------- Thumbnail (жагсаалтын жижиг зураг) ----------
+const FALLBACK_ICON = 'icons/video128.png';
+const thumbQueue = [];
+let thumbActive = 0;
+const THUMB_PARALLEL = 3;
+let thumbObserver = null;
+
+function setThumbImg(box, src) {
+  const img = document.createElement('img');
+  img.alt = '';
+  img.addEventListener('error', () => {
+    if (img.src.endsWith(FALLBACK_ICON)) return;
+    img.src = FALLBACK_ICON;
+    box.classList.add('icon');
+  });
+  img.src = src || FALLBACK_ICON;
+  if (!src) box.classList.add('icon');
+  box.replaceChildren(img);
+}
+
+function fallbackThumb(box, it) {
+  setThumbImg(box, it.poster || pageThumb || '');
+}
+
+// Видеоны эхний хэсгээс нэг кадр авч canvas дээр зурна
+function grabFrame(box, it, done) {
+  const v = document.createElement('video');
+  v.muted = true;
+  v.preload = 'metadata';
+  v.playsInline = true;
+  let finished = false;
+  const timer = setTimeout(() => finish(false), 12000);
+  function finish(ok) {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    if (ok) {
+      try {
+        const c = document.createElement('canvas');
+        const w = v.videoWidth || 160;
+        const h = v.videoHeight || 90;
+        const scale = Math.min(1, 240 / w);
+        c.width = Math.round(w * scale);
+        c.height = Math.round(h * scale);
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        box.replaceChildren(c);
+        box.classList.remove('icon');
+        if (!it.width && v.videoWidth) { it.width = v.videoWidth; it.height = v.videoHeight; }
+        if (!it.duration && isFinite(v.duration)) it.duration = v.duration;
+        const small = box.parentElement && box.parentElement.querySelector('.small');
+        if (small) small.textContent = infoText(it);
+      } catch (e) {
+        fallbackThumb(box, it);
+      }
+    } else {
+      fallbackThumb(box, it);
+    }
+    v.removeAttribute('src');
+    v.load();
+    done();
+  }
+  v.addEventListener('loadedmetadata', () => {
+    if (!v.videoWidth) { finish(false); return; } // зөвхөн дуутай урсгал
+    const t = isFinite(v.duration) && v.duration > 2 ? 1 : 0;
+    if (t) v.currentTime = t; else if (v.readyState >= 2) finish(true);
+  });
+  v.addEventListener('seeked', () => finish(true));
+  v.addEventListener('loadeddata', () => { if (!v.currentTime) setTimeout(() => finish(true), 300); });
+  v.addEventListener('error', () => finish(false));
+  v.src = it.url;
+}
+
+function pumpThumbs() {
+  while (thumbActive < THUMB_PARALLEL && thumbQueue.length) {
+    const job = thumbQueue.shift();
+    if (!job.box.isConnected) continue;
+    thumbActive++;
+    grabFrame(job.box, job.it, () => { thumbActive--; pumpThumbs(); });
+  }
+}
+
+function makeThumb(it) {
+  const box = document.createElement('div');
+  box.className = 'thumb';
+  if (it.kind === 'audio') {
+    box.classList.add('audio');
+    box.textContent = '♪';
+    return box;
+  }
+  if (it.kind === 'video' && /^https?:/i.test(it.url)) {
+    // Эхлээд poster/дүрс тэмдэг харуулж, харагдах үед нь кадр авна
+    fallbackThumb(box, it);
+    box._item = it;
+    if (thumbObserver) thumbObserver.observe(box);
+    return box;
+  }
+  fallbackThumb(box, it);
+  return box;
+}
+
+function resetThumbs() {
+  thumbQueue.length = 0;
+  if (thumbObserver) thumbObserver.disconnect();
+  thumbObserver = new IntersectionObserver((entries) => {
+    entries.forEach((e) => {
+      if (!e.isIntersecting) return;
+      thumbObserver.unobserve(e.target);
+      thumbQueue.push({ box: e.target, it: e.target._item });
+    });
+    pumpThumbs();
+  }, { root: $('list'), rootMargin: '200px' });
+}
+
+function infoText(it) {
+  const info = [];
+  if (it.width && it.height) info.push(`${it.width}×${it.height}`);
+  if (it.duration) info.push(fmtDur(it.duration));
+  if (it.size) info.push(AMG.humanSize(it.size));
+  if (it.label) info.push(it.label);
+  info.push(SOURCE_LABEL[it.source] || it.source);
+  let note = '';
+  if (it.kind === 'blob') note = ' — шууд татагдахгүй (blob). Видеог тоглуулаад ⟳ дарвал сүлжээний холбоос гарч ирнэ.';
+  if (it.kind === 'dash') note = ' — DASH жагсаалт дэмжигдэхгүй, доорх video/audio холбоосыг сонгоно уу.';
+  return info.join(' · ') + note;
+}
+
 function render() {
   const ul = $('list');
   ul.innerHTML = '';
+  resetThumbs();
   const usable = items.filter(canDownload);
   if (!items.length) {
     ul.innerHTML = '<li class="empty">Медиа олдсонгүй.<br><span class="small">Видеог нэг удаа тоглуулаад ⟳ дарж дахин хайгаарай.</span></li>';
@@ -48,22 +176,15 @@ function render() {
 
     const meta = document.createElement('div');
     meta.className = 'meta';
-    const info = [];
-    if (it.width && it.height) info.push(`${it.width}×${it.height}`);
-    if (it.duration) info.push(fmtDur(it.duration));
-    if (it.size) info.push(AMG.humanSize(it.size));
-    if (it.label) info.push(it.label);
-    info.push(SOURCE_LABEL[it.source] || it.source);
-    let note = '';
-    if (it.kind === 'blob') note = ' — шууд татагдахгүй (blob). Видеог тоглуулаад ⟳ дарвал сүлжээний холбоос гарч ирнэ.';
-    if (it.kind === 'dash') note = ' — DASH жагсаалт дэмжигдэхгүй, доорх video/audio холбоосыг сонгоно уу.';
     meta.innerHTML = `<div><span class="badge ${it.kind}">${KIND_LABEL[it.kind] || it.kind}</span>`
       + `<span class="small"></span></div><div class="url"></div>`;
-    meta.querySelector('.small').textContent = info.join(' · ') + note;
+    meta.querySelector('.small').textContent = infoText(it);
     meta.querySelector('.url').textContent = it.url;
     meta.querySelector('.url').title = it.url;
 
-    li.append(cb, meta);
+    const thumb = makeThumb(it);
+    thumb.addEventListener('click', () => { if (!cb.disabled) { cb.checked = !cb.checked; updateButton(); } });
+    li.append(cb, thumb, meta);
     ul.append(li);
   });
   $('selectAll').checked = false;
@@ -96,7 +217,7 @@ function normalize(raw) {
     const url = kind === 'blob' ? r.url : AMG.cleanUrl(r.url);
     const prev = map.get(url);
     if (prev) {
-      ['width', 'height', 'duration', 'size', 'label', 'mime'].forEach((k) => { if (!prev[k] && r[k]) prev[k] = r[k]; });
+      ['width', 'height', 'duration', 'size', 'label', 'mime', 'poster'].forEach((k) => { if (!prev[k] && r[k]) prev[k] = r[k]; });
     } else {
       map.set(url, Object.assign({}, r, { url, kind }));
     }
@@ -108,6 +229,7 @@ function normalize(raw) {
 async function scanTab(tabId) {
   let scanned = [];
   let title = '';
+  let thumb = '';
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
@@ -116,13 +238,14 @@ async function scanTab(tabId) {
     results.forEach((r) => {
       if (!r || !r.result) return;
       if (r.frameId === 0) title = r.result.title;
+      if (r.result.pageThumb && (r.frameId === 0 || !thumb)) thumb = r.result.pageThumb;
       scanned = scanned.concat(r.result.items);
     });
   } catch (e) {
     // chrome:// гэх мэт хуудсанд скрипт ажиллахгүй
   }
   const sniffed = await chrome.runtime.sendMessage({ type: 'getSniffed', tabId });
-  return { title, items: (sniffed || []).concat(scanned) };
+  return { title, thumb, items: (sniffed || []).concat(scanned) };
 }
 
 async function loadTab(tabId) {
@@ -135,6 +258,7 @@ async function loadTab(tabId) {
   } catch (e) { /* ignore */ }
   const res = await scanTab(tabId);
   if (res.title) pageTitle = res.title;
+  pageThumb = res.thumb || '';
   items = normalize(res.items);
   render();
   const n = items.filter(canDownload).length;
@@ -172,6 +296,7 @@ async function loadLink(url) {
   $('linkInput').value = url;
   $('pageTitle').textContent = url;
   setStatus('Линкийг шалгаж байна…');
+  pageThumb = '';
   items = [];
   render();
 
@@ -197,6 +322,7 @@ async function loadLink(url) {
     await new Promise((r) => setTimeout(r, 5000));
     const res = await scanTab(tab.id);
     pageTitle = res.title || pageTitle;
+    pageThumb = res.thumb || '';
     $('pageTitle').textContent = pageTitle;
     items = normalize(res.items);
   } finally {
