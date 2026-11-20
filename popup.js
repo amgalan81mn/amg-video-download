@@ -33,11 +33,18 @@ function canDownload(it) {
 let groups = []; // [{ best: idx, variants: [idx, ...] }]
 let isCurrent = () => false;
 
+// AV1 эсэх: manifest-ийн codecs (av01…) байвал түүгээр, үгүй бол кодлолын нэрээр
+// ("r2av1-r1gen2vp9" нь VP9 ч байж болох тул codecs-ийг түрүүлж үзнэ)
+function isAv1(x) {
+  if (x.codecs) return /^av01/i.test(x.codecs);
+  return /(^|[_-])av1/i.test(x.encTag || '') && !/vp9/i.test(x.encTag || '');
+}
+
 function score(it) {
   // Дуутай видео > дуугүй видео > аудио. Дараа нь чанар (өндөр), bitrate, хэмжээгээр.
   const tier = it.kind === 'audio' ? 0 : (it.hasAudio ? 2 : 1);
   // Нийлүүлсэн AV1 хувилбар Windows-ийн зарим тоглуулагчид тоглохгүй тул шилдэг болгохгүй
-  const compat = it.merge && /av1/i.test(it.encTag || '') ? 0 : 1;
+  const compat = it.merge && isAv1(it) ? 0 : 1;
   return [tier, compat, it.qh || 0, it.bitrate || 0, it.size || 0];
 }
 function cmpScore(a, b) {
@@ -120,6 +127,9 @@ function baseNameOf(it, mode) {
 function foundText() {
   const n = groups.filter((g) => canDownload(items[g.best])).length;
   if (!n) return '';
+  if (groups.some(isCurrent)) {
+    return n > 1 ? `Одоо тоглож буй видео олдлоо (хуудсан дээр бусад ${n - 1} видео бий).` : 'Одоо тоглож буй видео олдлоо.';
+  }
   const v = groups.reduce((s, g) => s + g.variants.length, 0);
   return `${n} медиа олдлоо${v ? ` (+${v} өөр чанар)` : ''}. Сонгоод татна уу.`;
 }
@@ -226,9 +236,14 @@ function render() {
     ul.innerHTML = '<li class="empty">Медиа олдсонгүй.<br><span class="small">Видеог нэг удаа тоглуулаад ⟳ дарж дахин хайгаарай.</span></li>';
   }
   const usableGroups = groups.filter((g) => canDownload(items[g.best]));
+  // Reels гүйлгэхэд Facebook дараагийн олон видеог урьдчилан ачаалдаг. Одоо тоглож байгаа нь
+  // олдвол зөвхөн түүнийг харуулж, бусдыг нь "Бусад видео" товчны ард нууна.
+  const hasCurrent = groups.some(isCurrent);
+  const others = [];
   groups.forEach((g) => {
     const it = items[g.best];
     const li = document.createElement('li');
+    if (hasCurrent && !isCurrent(g)) { li.hidden = true; li.classList.add('other'); others.push(li); }
     const ok = canDownload(it);
     if (!ok) li.classList.add('disabled');
     const cb = makeCheckbox(g.best, 'best');
@@ -267,9 +282,26 @@ function render() {
     }
 
     li.dataset.base = baseNameOf(it, 'orig');
-    li.append(cb, makeThumb(it), meta);
+    // Нуугдсан мөрийн зургийг дэлгэхэд л ачаална
+    if (li.hidden) li.__thumb = () => makeThumb(it);
+    li.append(cb, li.hidden ? document.createElement('span') : makeThumb(it), meta);
     ul.append(li);
   });
+  if (others.length) {
+    const more = document.createElement('li');
+    more.className = 'more';
+    const btn = document.createElement('button');
+    btn.textContent = `Хуудсан дээрх бусад ${others.length} видеог харах ▾`;
+    btn.addEventListener('click', () => {
+      others.forEach((li) => {
+        li.hidden = false;
+        if (li.__thumb) { li.children[1].replaceWith(li.__thumb()); li.__thumb = null; }
+      });
+      more.remove();
+    });
+    more.append(btn);
+    ul.append(more);
+  }
   $('selectAll').checked = false;
   updateButton();
   markDownloaded();
@@ -366,7 +398,9 @@ function updateButton() {
 
 // "Бүгд" нь бүлэг бүрийн зөвхөн шилдэг хувилбарыг сонгоно
 $('selectAll').addEventListener('change', (e) => {
-  document.querySelectorAll('#list input.best:not(:disabled)').forEach((c) => { c.checked = e.target.checked; });
+  document.querySelectorAll('#list input.best:not(:disabled)').forEach((c) => {
+    if (!c.closest('li').hidden) c.checked = e.target.checked;
+  });
   if (!e.target.checked) document.querySelectorAll('#list input[type=checkbox]').forEach((c) => { c.checked = false; });
   updateButton();
 });
@@ -401,7 +435,7 @@ function normalize(raw, reps) {
       if (!it.duration && mi.duration) it.duration = mi.duration;
       if (mi.audioOnly) it.kind = 'audio';
       const rep = reps[mi.tag];
-      if (rep && rep.quality) it.quality = rep.quality;
+      if (!it.quality && rep && rep.quality) it.quality = rep.quality;
       if (rep && !it.width) { it.width = rep.width; it.height = rep.height; }
       const qm = (it.quality || '').match(/(\d{3,4})p/);
       it.qh = qm ? Number(qm[1]) : (mi.height || 0);
@@ -433,7 +467,6 @@ function addMerged(list) {
     if (!silent.length) return;
     const withSound = Math.max(0, ...arr.filter((x) => x.kind === 'video' && x.hasAudio).map((x) => x.qh || 0));
     // AV1 биш (VP9/H.264) хамгийн өндрийг үндсэн болгоно. AV1 нь илүү өндөр бол нэмэлт сонголт болно.
-    const isAv1 = (x) => /av1/i.test(x.encTag || '');
     const top = (arr2) => arr2.sort((a, b) => (b.qh - a.qh) || ((b.size || 0) - (a.size || 0)))[0];
     const plain = top(silent.filter((x) => !isAv1(x)));
     const av1 = top(silent.filter(isAv1));

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Amg-Video-Download",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "description": "Вэб дээрх видео, аудиог MP4 / MP3 хэлбэрээр татах. Баруун товч, линк, олон медиа сонгох.",
   "icons": {
     "16": "icons/icon16.png",
@@ -33,6 +33,14 @@
   ],
   "host_permissions": [
     "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.facebook.com/*", "*://*.instagram.com/*"],
+      "js": ["fbcap.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
   ],
   "commands": {
     "_execute_action": {

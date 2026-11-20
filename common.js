@@ -226,11 +226,32 @@ const AMG = (() => {
       const re = /"(browser_native_hd_url|browser_native_sd_url|playable_url_quality_hd|playable_url|progressive_url|video_url|contentUrl|hd_src|sd_src)"\s*:\s*"(https?:[^"]+)"/g;
       let m;
       let count = 0;
-      while ((m = re.exec(html)) && count < 60) {
+      while ((m = re.exec(html)) && count < 400) {
         let u = m[2];
         try { u = JSON.parse('"' + u + '"'); } catch (e) { u = u.replace(/\\\//g, '/'); }
         u = u.replace(/&amp;/g, '&');
         add(u, { label: m[1], source: 'json' });
+        count++;
+      }
+      // DASH manifest доторх <BaseURL> (дүрс тус бүрийн чанар, тусдаа дуу). Хуудасны HTML болон
+      // reels гүйлгэхэд fbcap.js-ийн барьж авсан GraphQL хариу (#__amg_cap) хоёуланд байна.
+      // Эхлээд <Representation>-ий шинжтэй хамт: кодек (av01/vp09/avc1), өргөн, өндөр, чанарын нэр.
+      // "q90" гэх мэт кодлолын нэр видео бүрт өөр нягтралтай байдаг тул холбоостой нь хамт авна.
+      const cre = /codecs=\\?"([^"\\]+)\\?"[^>]*?FBEncodingTag=\\?"([^"\\]+)\\?"[^>]*?width=\\?"(\d+)\\?"\s+height=\\?"(\d+)\\?"[^>]*?FBQualityLabel=\\?"([^"\\]+)\\?"[^>]*>[\s\S]{0,3000}?BaseURL(?:>|&gt;)(https?:(?:\\\/|[^\\<"\s])+)/g;
+      count = 0;
+      while ((m = cre.exec(html)) && count < 1500) {
+        const u = m[6].replace(/\\\//g, '/').replace(/&amp;/g, '&');
+        add(u, {
+          label: 'dash', source: 'json', codecs: m[1], width: Number(m[3]), height: Number(m[4]), quality: m[5],
+        });
+        count++;
+      }
+      // Үлдсэн нь (тусдаа дуу гэх мэт)
+      const bre = /BaseURL(?:>|&gt;)(https?:(?:\\\/|[^\\<"\s])+)/g;
+      count = 0;
+      while ((m = bre.exec(html)) && count < 1500) {
+        const u = m[1].replace(/\\\//g, '/').replace(/&amp;/g, '&');
+        add(u, { label: 'dash', source: 'json' });
         count++;
       }
     } catch (e) { /* ignore */ }
@@ -241,7 +262,7 @@ const AMG = (() => {
       const rre = /FBEncodingTag=\\?"([^"\\]+)\\?"[^>]*?width=\\?"(\d+)\\?"\s+height=\\?"(\d+)\\?"[^>]*?FBQualityLabel=\\?"([^"\\]+)\\?"/g;
       let m;
       let count = 0;
-      while ((m = rre.exec(html)) && count < 300) {
+      while ((m = rre.exec(html)) && count < 3000) {
         reps[m[1]] = { width: Number(m[2]), height: Number(m[3]), quality: m[4] };
         count++;
       }
