@@ -13,7 +13,9 @@ async function getSniffed(tabId) {
 
 async function setSniffed(tabId, list) {
   await chrome.storage.session.set({ [KEY(tabId)]: list });
-  const n = list.filter((i) => i.kind !== 'blob').length;
+  // Нэг видеоны өөр өөр чанарыг нэг гэж тоолно
+  const keys = new Set(list.filter((i) => i.kind !== 'blob').map((i) => AMG.mediaInfo(i.url).group || i.url));
+  const n = keys.size;
   chrome.action.setBadgeText({ tabId, text: n ? String(n) : '' }).catch(() => {});
   chrome.action.setBadgeBackgroundColor({ tabId, color: '#dc2626' }).catch(() => {});
 }

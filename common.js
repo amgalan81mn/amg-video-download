@@ -154,6 +154,31 @@ const AMG = (() => {
     return chrome.downloads.download({ url, filename: rel, conflictAction, saveAs: false });
   }
 
+  // Facebook/Instagram (fbcdn) холбоосын efg параметрийг задлаж: аль видеонд хамаарах,
+  // ямар чанартай, дуутай эсэхийг тодорхойлно. Мэдээлэлгүй бол {}.
+  function mediaInfo(url) {
+    const info = {};
+    let u;
+    try { u = new URL(url); } catch (e) { return info; }
+    const efg = u.searchParams.get('efg');
+    if (efg) {
+      try {
+        const j = JSON.parse(atob(efg.replace(/-/g, '+').replace(/_/g, '/')));
+        if (j.vencode_tag) info.tag = String(j.vencode_tag);
+        if (j.xpv_asset_id || j.video_id) info.group = `fb_${j.xpv_asset_id || j.video_id}`;
+        if (j.video_id) info.videoId = String(j.video_id);
+        if (j.bitrate) info.bitrate = Number(j.bitrate) || 0;
+        if (j.duration_s) info.duration = Number(j.duration_s) || 0;
+      } catch (e) { /* ignore */ }
+    }
+    const tag = info.tag || '';
+    if (/audio/i.test(tag)) info.audioOnly = true;
+    if (/progressive/i.test(tag)) info.hasAudio = true;
+    const h = tag.match(/(\d{3,4})p\b/) || tag.match(/\.(\d{3,4})\./);
+    if (h) info.height = Number(h[1]);
+    return info;
+  }
+
   function humanSize(n) {
     if (!n || n <= 0) return '';
     const u = ['B', 'KB', 'MB', 'GB'];
@@ -181,9 +206,6 @@ const AMG = (() => {
         height: el.videoHeight || 0,
         duration: isFinite(el.duration) ? el.duration : 0,
       };
-      if (el.poster) {
-        try { info.poster = new URL(el.poster, location.href).toString(); } catch (e) { /* ignore */ }
-      }
       add(el.currentSrc || el.src, info);
       el.querySelectorAll('source').forEach((s) => add(s.src, Object.assign({}, info, { mime: s.type || '' })));
     });
@@ -200,7 +222,7 @@ const AMG = (() => {
     // Facebook / Instagram гэх мэт хуудасны JSON өгөгдөл дотроос шууд холбоос хайх
     try {
       const html = document.documentElement.innerHTML;
-      const re = /"(browser_native_hd_url|browser_native_sd_url|playable_url_quality_hd|playable_url|video_url|contentUrl|hd_src|sd_src)"\s*:\s*"(https?:[^"]+)"/g;
+      const re = /"(browser_native_hd_url|browser_native_sd_url|playable_url_quality_hd|playable_url|progressive_url|video_url|contentUrl|hd_src|sd_src)"\s*:\s*"(https?:[^"]+)"/g;
       let m;
       let count = 0;
       while ((m = re.exec(html)) && count < 60) {
@@ -211,21 +233,23 @@ const AMG = (() => {
         count++;
       }
     } catch (e) { /* ignore */ }
-    // Жагсаалтын thumbnail-д ашиглах хуудасны ерөнхий зураг
-    let pageThumb = '';
-    const og = document.querySelector('meta[property="og:image"], meta[name="og:image"], meta[name="twitter:image"]');
-    if (og && og.content) {
-      try { pageThumb = new URL(og.content, location.href).toString(); } catch (e) { /* ignore */ }
-    }
-    if (!pageThumb) {
-      const v = [...document.querySelectorAll('video[poster]')].find((x) => x.poster);
-      if (v) pageThumb = v.poster;
-    }
-    return { title: document.title, url: location.href, pageThumb, items: out };
+    // Facebook-ийн DASH жагсаалтаас: кодлолын нэр → чанар (720p гэх мэт), өргөн, өндөр
+    const reps = {};
+    try {
+      const html = document.documentElement.innerHTML;
+      const rre = /FBEncodingTag=\\?"([^"\\]+)\\?"[^>]*?width=\\?"(\d+)\\?"\s+height=\\?"(\d+)\\?"[^>]*?FBQualityLabel=\\?"([^"\\]+)\\?"/g;
+      let m;
+      let count = 0;
+      while ((m = rre.exec(html)) && count < 300) {
+        reps[m[1]] = { width: Number(m[2]), height: Number(m[3]), quality: m[4] };
+        count++;
+      }
+    } catch (e) { /* ignore */ }
+    return { title: document.title, url: location.href, items: out, reps };
   }
 
   return {
-    classify, cleanUrl, guessExt, fileName, safeName, humanSize, scanPage, extOf,
+    classify, cleanUrl, guessExt, fileName, safeName, humanSize, scanPage, extOf, mediaInfo,
     DEFAULT_SETTINGS, cleanFolder, getSettings, saveSettings, download,
   };
 })();

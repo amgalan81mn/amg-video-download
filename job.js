@@ -208,8 +208,8 @@ async function hlsDownload(item, title, idx, row) {
     const label = `${i + 1}. ${job.type === 'mp3' ? 'MP3' : 'HLS'} — ${AMG.safeName(job.title, 60)}`;
     const row = makeRow(label);
     try {
-      if (job.type === 'mp3') await toMp3(it, AMG.fileName(job.title, 'mp3', multi ? i + 1 : 0), row);
-      else await hlsDownload(it, job.title, multi ? i + 1 : 0, row);
+      if (job.type === 'mp3') await toMp3(it, AMG.fileName(it.baseName || job.title, 'mp3', it.baseName ? 0 : (multi ? i + 1 : 0)), row);
+      else await hlsDownload(it, it.baseName || job.title, it.baseName ? 0 : (multi ? i + 1 : 0), row);
       okCount++;
     } catch (e) {
       row.fail(e.message || String(e));
