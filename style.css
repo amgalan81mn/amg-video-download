@@ -92,3 +92,9 @@ footer { padding: 10px 12px; background: #fff; border-top: 1px solid #e5e7eb; }
 .history li .small { white-space: nowrap; }
 .history li button { padding: 2px 6px; font-size: 12px; }
 .history .small-btn { margin-top: 6px; font-size: 11px; padding: 3px 8px; color: #b91c1c; }
+.thumb .play {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 24px; text-align: center; pointer-events: none;
+  opacity: .85; transition: opacity .15s, transform .15s;
+}
+.thumb:hover .play { opacity: 1; transform: translate(-50%, -50%) scale(1.15); background: #dc2626; }

@@ -163,15 +163,33 @@ function makeThumb(it) {
   v.addEventListener('error', () => { box.textContent = '🎬'; box.classList.add('ph'); });
   box.addEventListener('mouseenter', () => { v.play().catch(() => {}); });
   box.addEventListener('mouseleave', () => { v.pause(); });
-  // Зураг дээр дарахад тухайн мөрийг сонгоно/болиулна
+  // Зураг дээр дарахад шинэ цонхонд дуутай тоглуулна
+  const play = document.createElement('span');
+  play.className = 'play';
+  play.textContent = '▶';
   box.addEventListener('click', () => {
-    const li = box.closest('li');
-    const cb = li && li.querySelector('input[type="checkbox"]');
-    if (cb && !cb.disabled) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
+    v.pause();
+    openPlayer(it, v.videoWidth, v.videoHeight);
   });
-  box.title = 'Хулгана аваачихад урьдчилан харна, дарахад сонгоно';
-  box.append(v, dur);
+  box.title = 'Хулгана аваачихад урьдчилан харна. Дарахад шинэ цонхонд дуутай тоглоно';
+  box.append(v, play, dur);
   return box;
+}
+
+// Тоглуулагч цонх: видеоны хэмжээнд тааруулж (босоо reel бол нарийн, өндөр) нээнэ
+function openPlayer(it, vw, vh) {
+  const w0 = vw || it.width || 16;
+  const h0 = vh || it.height || 9;
+  const maxH = Math.min(820, (screen.availHeight || 900) - 80);
+  const maxW = Math.min(1280, (screen.availWidth || 1400) - 80);
+  let h = maxH;
+  let w = Math.round((h * w0) / h0);
+  if (w > maxW) { w = maxW; h = Math.round((w * h0) / w0); }
+  const q = new URLSearchParams({ v: it.url, t: baseNameOf(it, 'orig') });
+  if (it.merge && it.audioUrl) q.set('a', it.audioUrl);
+  chrome.windows.create({
+    url: chrome.runtime.getURL(`player.html?${q}`), type: 'popup', width: Math.max(w, 320), height: h + 40, focused: true,
+  });
 }
 
 function variantRow(i) {
@@ -384,6 +402,7 @@ function normalize(raw, reps) {
       if (mi.audioOnly) it.kind = 'audio';
       const rep = reps[mi.tag];
       if (rep && rep.quality) it.quality = rep.quality;
+      if (rep && !it.width) { it.width = rep.width; it.height = rep.height; }
       const qm = (it.quality || '').match(/(\d{3,4})p/);
       it.qh = qm ? Number(qm[1]) : (mi.height || 0);
       if (!it.quality && mi.height) it.quality = `${mi.height}p`;
