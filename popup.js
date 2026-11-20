@@ -15,7 +15,7 @@ function setStatus(text, err) {
   $('status').classList.toggle('err', !!err);
 }
 
-const KIND_LABEL = { video: 'VIDEO', audio: 'AUDIO', hls: 'HLS', dash: 'DASH', blob: 'BLOB' };
+const KIND_LABEL = { video: 'VIDEO', audio: 'AUDIO', hls: 'HLS', dash: 'DASH', blob: 'BLOB', image: 'ЗУРАГ' };
 const SOURCE_LABEL = { network: 'сүлжээ', dom: 'хуудас', json: 'хуудасны өгөгдөл', link: 'линк' };
 
 function fmtDur(s) {
@@ -26,7 +26,11 @@ function fmtDur(s) {
 }
 
 function canDownload(it) {
-  return it.kind === 'video' || it.kind === 'audio' || it.kind === 'hls';
+  return it.kind === 'video' || it.kind === 'audio' || it.kind === 'hls' || it.kind === 'image';
+}
+// Видео/аудио (зурагнаас бусад) татаж болох медиа
+function isMedia(it) {
+  return it.kind !== 'image' && canDownload(it);
 }
 
 // Нэг видеоны олон чанарыг нэг бүлэгт нэгтгэнэ. Бүлэг бүрт хамгийн сайныг нь "best" болгоно.
@@ -74,7 +78,7 @@ function buildGroups() {
   // эсвэл хуудсан дээр яг одоо тоглож байгаа видео (Instagram, TikTok гэх мэт)
   isCurrent = (g) => [g.best].concat(g.variants)
     .some((i) => (items[i].videoId && pageUrl.includes(items[i].videoId)) || items[i].playing);
-  const order = { video: 0, audio: 1, hls: 2, dash: 3, blob: 4 };
+  const order = { video: 0, audio: 1, hls: 2, dash: 3, blob: 4, image: 5 };
   groups.sort((a, b) => (isCurrent(b) - isCurrent(a)) || (order[items[a.best].kind] - order[items[b.best].kind])
     || ((items[b.best].size || 0) - (items[a.best].size || 0)));
   tagGroups();
@@ -105,7 +109,7 @@ function pageVideoId() {
   return '';
 }
 function tagGroups() {
-  const usableGroups = groups.filter((g) => canDownload(items[g.best]));
+  const usableGroups = groups.filter((g) => isMedia(items[g.best]));
   groups.forEach((g) => {
     const all = [g.best].concat(g.variants);
     let vid = (all.map((i) => items[i].videoId).find(Boolean)) || '';
@@ -115,7 +119,20 @@ function tagGroups() {
 }
 
 // Файлын нэр: amg-video-download-<видео ID> (шилдэгээс бусад нь -720p гэх мэт чанартай)
+// Зургийн өргөтгөл (зураг биш бол '')
+function imageExt(it) {
+  if (it.kind !== 'image') return '';
+  const e = AMG.extOf(it.url);
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'bmp'].includes(e)) return e;
+  const m = (it.url.match(/[?&](?:format|fm|stp)=[^&]*?(jpg|jpeg|png|webp|gif|avif)/i) || [])[1];
+  return m ? m.toLowerCase() : 'jpg';
+}
+
 function baseNameOf(it, mode) {
+  if (it.kind === 'image') {
+    const id = pageVideoId();
+    return `${id ? `amg-video-download-${id}` : pageTitle}-img`;
+  }
   const q = it.kind === 'audio' ? 'audio' : qualityText(it);
   if (it.gvid) {
     const base = `amg-video-download-${it.gvid}`;
@@ -125,7 +142,7 @@ function baseNameOf(it, mode) {
 }
 
 function foundText() {
-  const n = groups.filter((g) => canDownload(items[g.best])).length;
+  const n = groups.filter((g) => isMedia(items[g.best])).length;
   if (!n) return '';
   if (groups.some(isCurrent)) {
     return n > 1 ? `Одоо тоглож буй видео олдлоо (хуудсан дээр бусад ${n - 1} видео бий).` : 'Одоо тоглож буй видео олдлоо.';
@@ -157,6 +174,18 @@ function makeThumb(it) {
   const box = document.createElement('div');
   box.className = 'thumb';
   if (it.kind === 'audio') { box.textContent = '🎵'; box.classList.add('ph'); return box; }
+  if (it.kind === 'image') {
+    // Зураг: дарахад сонгогдоно
+    const img = document.createElement('img');
+    img.src = it.url;
+    img.loading = 'lazy';
+    img.alt = '';
+    img.addEventListener('load', () => box.classList.toggle('wide', img.naturalWidth > img.naturalHeight));
+    img.addEventListener('error', () => { box.textContent = '🖼'; box.classList.add('ph'); });
+    box.classList.add('img');
+    box.append(img);
+    return box;
+  }
   if (it.kind !== 'video') { box.textContent = '🎬'; box.classList.add('ph'); return box; }
   const v = document.createElement('video');
   v.muted = true;
@@ -235,13 +264,15 @@ function render() {
   if (!items.length) {
     ul.innerHTML = '<li class="empty">Медиа олдсонгүй.<br><span class="small">Видеог нэг удаа тоглуулаад ⟳ дарж дахин хайгаарай.</span></li>';
   }
-  const usableGroups = groups.filter((g) => canDownload(items[g.best]));
+  const usableGroups = groups.filter((g) => isMedia(items[g.best]));
   // Reels гүйлгэхэд Facebook дараагийн олон видеог урьдчилан ачаалдаг. Одоо тоглож байгаа нь
   // олдвол зөвхөн түүнийг харуулж, бусдыг нь "Бусад видео" товчны ард нууна.
   const hasCurrent = groups.some(isCurrent);
   const others = [];
+  const images = [];
   groups.forEach((g) => {
     const it = items[g.best];
+    if (it.kind === 'image') { images.push(g.best); return; }
     const li = document.createElement('li');
     if (hasCurrent && !isCurrent(g)) { li.hidden = true; li.classList.add('other'); others.push(li); }
     const ok = canDownload(it);
@@ -302,9 +333,49 @@ function render() {
     more.append(btn);
     ul.append(more);
   }
+  if (images.length) ul.append(imageSection(images, !usableGroups.length));
   $('selectAll').checked = false;
   updateButton();
   markDownloaded();
+}
+
+// ---------- Зураг (том хэмжээтэй) ----------
+// Видеоны жагсаалтыг дүүргэхгүйн тулд тусдаа, эвхэгддэг хэсэгт харуулна.
+// Хуудсан дээр видео байхгүй бол (зургийн пост гэх мэт) шууд дэлгэгдсэн байна.
+function imageSection(idxs, open) {
+  const li = document.createElement('li');
+  li.className = 'images';
+  const det = document.createElement('details');
+  det.open = open;
+  const sum = document.createElement('summary');
+  sum.textContent = `🖼 Том хэмжээтэй зураг (${idxs.length})`;
+  const all = document.createElement('label');
+  all.className = 'small imgall';
+  const allCb = document.createElement('input');
+  allCb.type = 'checkbox';
+  allCb.addEventListener('change', () => {
+    det.querySelectorAll('input.img').forEach((c) => { c.checked = allCb.checked; });
+    updateButton();
+  });
+  all.append(allCb, ' Бүх зургийг сонгох');
+  const grid = document.createElement('div');
+  grid.className = 'imggrid';
+  idxs.forEach((i) => {
+    const it = items[i];
+    const cell = document.createElement('label');
+    cell.className = 'imgcell';
+    const cb = makeCheckbox(i, 'img');
+    const box = makeThumb(it);
+    const cap = document.createElement('span');
+    cap.className = 'small';
+    cap.textContent = it.width && it.height ? `${it.width}×${it.height}` : '';
+    cell.title = it.url;
+    cell.append(cb, box, cap);
+    grid.append(cell);
+  });
+  det.append(sum, all, grid);
+  li.append(det);
+  return li;
 }
 
 // ---------- Татсан түүх ----------
@@ -415,7 +486,7 @@ function normalize(raw, reps) {
     if (!kind && r.source === 'json') kind = 'video';
     if (!kind) return;
     const url = kind === 'blob' ? r.url : AMG.cleanUrl(r.url);
-    const mi = kind === 'blob' ? {} : AMG.mediaInfo(url);
+    const mi = kind === 'blob' || kind === 'image' ? {} : AMG.mediaInfo(url);
     // Ижил видеоны ижил кодлолыг (өөр параметртэй холбоос) нэг гэж үзнэ
     const key = mi.group && mi.tag ? `${mi.group}|${mi.tag}` : url;
     const prev = map.get(key);
@@ -607,7 +678,9 @@ $('downloadBtn').addEventListener('click', async () => {
   const skipped = [];
 
   sel.forEach((it) => {
-    if (it.merge) {
+    if (it.kind === 'image') {
+      direct.push(it); // зураг эх форматаараа (MP3 сонгосон ч)
+    } else if (it.merge) {
       // MP3 бол зөвхөн тусдаа дууг нь хөрвүүлнэ
       if (mode === 'mp3') mp3Jobs.push(Object.assign({}, it, { url: it.audioUrl, kind: 'audio', merge: false }));
       else mergeJobs.push(it);
@@ -635,7 +708,7 @@ $('downloadBtn').addEventListener('click', async () => {
       type: 'download',
       items: direct.map((it) => ({
         url: it.url,
-        name: AMG.fileName(nameFor(it), mode === 'mp3' ? 'mp3' : AMG.guessExt(it), 0),
+        name: AMG.fileName(nameFor(it), imageExt(it) || (mode === 'mp3' ? 'mp3' : AMG.guessExt(it)), 0),
       })),
     });
   }
@@ -686,7 +759,7 @@ function autoDownload() {
     setStatus('Шилдэг чанараар татаж байна…');
     $('downloadBtn').click();
     setTimeout(() => window.close(), 2500);
-  } else if (groups.some((g) => canDownload(items[g.best]))) {
+  } else if (groups.some((g) => isMedia(items[g.best]))) {
     setStatus('Олон видео олдлоо. Хэрэгтэйгээ сонгоод Enter дарна уу.');
   }
 }

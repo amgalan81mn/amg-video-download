@@ -210,6 +210,32 @@ const AMG = (() => {
       add(el.currentSrc || el.src, info);
       el.querySelectorAll('source').forEach((s) => add(s.src, Object.assign({}, info, { mime: s.type || '' })));
     });
+    // Том хэмжээтэй зураг: srcset-ээс хамгийн томыг сонгоно. Жижиг дүрс, профайл зургийг алгасна.
+    const MIN_IMG = 400;
+    const imgs = [];
+    document.querySelectorAll('img').forEach((im) => {
+      let url = im.currentSrc || im.src;
+      let w = im.naturalWidth || 0;
+      let h = im.naturalHeight || 0;
+      if (im.srcset) {
+        im.srcset.split(',').forEach((c) => {
+          const [u, d] = c.trim().split(/\s+/);
+          const cw = d && /w$/.test(d) ? parseInt(d, 10) : 0;
+          if (u && cw > w) {
+            if (w && h) h = Math.round((h * cw) / w);
+            w = cw;
+            url = u;
+          }
+        });
+      }
+      if (!url || /^(data|blob):/.test(url) || Math.max(w, h) < MIN_IMG) return;
+      imgs.push({ url, w, h });
+    });
+    imgs.sort((a, b) => b.w * b.h - a.w * a.h).slice(0, 60)
+      .forEach((x) => add(x.url, { kind: 'image', width: x.w, height: x.h }));
+    document.querySelectorAll('meta[property="og:image"], meta[property="og:image:url"]').forEach((m) => {
+      if (m.content) add(m.content, { kind: 'image', label: 'og:image' });
+    });
     const metaKeys = ['og:video', 'og:video:url', 'og:video:secure_url', 'og:audio', 'og:audio:url',
       'og:audio:secure_url', 'twitter:player:stream'];
     document.querySelectorAll('meta[property], meta[name]').forEach((m) => {
