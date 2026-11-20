@@ -525,14 +525,25 @@ function normalize(raw, reps) {
       const qm = (it.quality || '').match(/(\d{3,4})p/);
       it.qh = qm ? Number(qm[1]) : (mi.height || 0);
       if (!it.quality && mi.height) it.quality = `${mi.height}p`;
-    } else if (/progressive_url|hd_src|sd_src|playable_url|browser_native/.test(r.label || '')) {
-      it.hasAudio = true; // Facebook-ийн эдгээр холбоос дүрс+дуу хамт байдаг
+    }
+    if (/progressive_url|hd_src|sd_src|playable_url|browser_native|video_versions/.test(r.label || '')) {
+      it.hasAudio = true; // Facebook-ийн эдгээр холбоос, Instagram-ийн video_versions дүрс+дуу хамт байдаг
       it.mediaKnown = true;
+      if (it.kind === 'audio') it.kind = 'video';
+    }
+    // Instagram: холбоос аль reel/пост-ынх болохыг "code"-оор нь (хаягт байдаг) тодорхойлно
+    if (r.igCode) {
+      it.videoId = r.igCode;
+      if (!it.group) it.group = `ig_${r.igCode}`;
     }
     if (!it.qh && it.height) it.qh = Math.min(it.width || it.height, it.height);
     map.set(key, it);
   });
-  return addMerged([...map.values()]);
+  let list = [...map.values()];
+  // blob: (Instagram, YouTube гэх мэт) холбоосыг шууд татах боломжгүй. Өөр татаж болох медиа
+  // олдсон бол тэдгээрийг жагсаалтаас хасна.
+  if (list.some((x) => isMedia(x))) list = list.filter((x) => x.kind !== 'blob');
+  return addMerged(list);
 }
 
 // Facebook: өндөр чанарын дүрс нь дуугүй, дуу нь тусдаа ирдэг. Дуутай хувилбараас өндөр чанартай

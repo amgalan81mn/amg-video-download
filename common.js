@@ -249,6 +249,41 @@ const AMG = (() => {
     // Facebook / Instagram гэх мэт хуудасны JSON өгөгдөл дотроос шууд холбоос хайх
     try {
       const html = document.documentElement.innerHTML;
+      // Instagram: холбоос бүрийн өмнөх хамгийн ойрын "code" нь тухайн reel/пост-ын хаягийн код
+      const codes = [];
+      if (/(^|\.)instagram\.com$/.test(location.hostname)) {
+        const cre0 = /"code"\s*:\s*"(?![a-z]{2}_[A-Z]{2}")([A-Za-z0-9_-]{8,})"/g; // en_US гэх мэтийг алгасна
+        let c;
+        while ((c = cre0.exec(html))) codes.push([c.index, c[1]]);
+      }
+      const codeAt = (pos) => {
+        let lo = 0;
+        let hi = codes.length - 1;
+        let ans;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          if (codes[mid][0] < pos) { ans = codes[mid][1]; lo = mid + 1; } else hi = mid - 1;
+        }
+        return ans === '__none__' ? undefined : ans;
+      };
+      // Хуудасны HTML-ийн сүүлийн код fbcap-ийн барьсан хэсэгт (#__amg_cap) дамжихгүй байх
+      const capAt = html.indexOf('id="__amg_cap"');
+      if (capAt >= 0 && codes.length) codes.push([capAt, '__none__']);
+      codes.sort((a, b) => a[0] - b[0]);
+      // Instagram-ийн дуутай MP4 (video_versions)
+      const vre = /"video_versions"\s*:\s*(\[[^\]]*\])/g;
+      let vm;
+      while ((vm = vre.exec(html))) {
+        try {
+          JSON.parse(vm[1]).forEach((v) => {
+            if (v && v.url) {
+              add(v.url, {
+                label: 'video_versions', source: 'json', width: v.width || 0, height: v.height || 0, igCode: codeAt(vm.index),
+              });
+            }
+          });
+        } catch (e) { /* ignore */ }
+      }
       const re = /"(browser_native_hd_url|browser_native_sd_url|playable_url_quality_hd|playable_url|progressive_url|video_url|contentUrl|hd_src|sd_src)"\s*:\s*"(https?:[^"]+)"/g;
       let m;
       let count = 0;
@@ -256,7 +291,7 @@ const AMG = (() => {
         let u = m[2];
         try { u = JSON.parse('"' + u + '"'); } catch (e) { u = u.replace(/\\\//g, '/'); }
         u = u.replace(/&amp;/g, '&');
-        add(u, { label: m[1], source: 'json' });
+        add(u, { label: m[1], source: 'json', igCode: codeAt(m.index) });
         count++;
       }
       // DASH manifest доторх <BaseURL> (дүрс тус бүрийн чанар, тусдаа дуу). Хуудасны HTML болон
@@ -267,8 +302,11 @@ const AMG = (() => {
       count = 0;
       while ((m = cre.exec(html)) && count < 1500) {
         const u = m[6].replace(/\\\//g, '/').replace(/&amp;/g, '&');
+        // FBContentLength байвал файлын хэмжээ
+        const len = (m[0].match(/FBContentLength=\\?"(\d+)/) || [])[1];
         add(u, {
           label: 'dash', source: 'json', codecs: m[1], width: Number(m[3]), height: Number(m[4]), quality: m[5],
+          size: len ? Number(len) : 0, igCode: codeAt(m.index),
         });
         count++;
       }
@@ -277,7 +315,7 @@ const AMG = (() => {
       count = 0;
       while ((m = bre.exec(html)) && count < 1500) {
         const u = m[1].replace(/\\\//g, '/').replace(/&amp;/g, '&');
-        add(u, { label: 'dash', source: 'json' });
+        add(u, { label: 'dash', source: 'json', igCode: codeAt(m.index) });
         count++;
       }
     } catch (e) { /* ignore */ }

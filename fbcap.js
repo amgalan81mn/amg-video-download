@@ -7,24 +7,51 @@
   window.__amgCapInstalled = true;
 
   const MAX_CHARS = 4000000; // хэт их санах ой эзлэхээс сэргийлнэ (хуучнаас нь хасна)
-  const WANT = /manifest_xml|video_dash_manifest|progressive_url|playable_url|browser_native_/;
+  const WANT = /manifest_xml|video_dash_manifest|video_versions|progressive_url|playable_url|browser_native_/;
   const PICK = [
     /"(?:manifest_xml|video_dash_manifest)"\s*:\s*"(?:[^"\\]|\\.)*"/g,
     /"(?:progressive_url|playable_url[a-z_]*|browser_native_[a-z_]*url)"\s*:\s*"(?:[^"\\]|\\.)*"/g,
+    /"video_versions"\s*:\s*\[[^\]]*\]/g, // Instagram: дуутай MP4 хувилбарууд
   ];
+  // Instagram: медиа бүрийн "code" (хаягт байдаг Df7dtW_R9X6 гэх мэт) нь түүний видеоноос өмнө ирдэг.
+  // Видеоны хэсэг бүрийн өмнө хамгийн ойрын code-ийг нэмж бичнэ, ингэвэл scanPage тааруулж чадна.
+  const CODE_RE = /"code"\s*:\s*"(?![a-z]{2}_[A-Z]{2}")([A-Za-z0-9_-]{8,})"/g; // en_US гэх мэтийг алгасна
   const chunks = [];
   let total = 0;
   let el = null;
 
   function keep(text) {
     if (typeof text !== 'string' || text.length < 200 || !WANT.test(text)) return;
-    const parts = [];
+    const codes = [];
+    CODE_RE.lastIndex = 0;
+    let c;
+    while ((c = CODE_RE.exec(text))) codes.push([c.index, c[1]]);
+    const codeBefore = (pos) => {
+      let lo = 0;
+      let hi = codes.length - 1;
+      let ans = null;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (codes[mid][0] < pos) { ans = codes[mid][1]; lo = mid + 1; } else hi = mid - 1;
+      }
+      return ans;
+    };
+    const found = [];
     PICK.forEach((re) => {
       re.lastIndex = 0;
       let m;
-      while ((m = re.exec(text))) parts.push(m[0]);
+      while ((m = re.exec(text))) found.push([m.index, m[0]]);
     });
-    if (!parts.length) return;
+    if (!found.length) return;
+    found.sort((a, b) => a[0] - b[0]);
+    // Хариу бүрийн эхэнд "код алга" тэмдэг: өмнөх хариуны код энэ хариунд дамжихгүй
+    const parts = ['"code":"__none__"'];
+    let lastCode = null;
+    found.forEach(([pos, frag]) => {
+      const code = codes.length ? codeBefore(pos) : null;
+      if (code && code !== lastCode) { parts.push(`"code":"${code}"`); lastCode = code; }
+      parts.push(frag);
+    });
     const chunk = parts.join('\n');
     chunks.push(chunk);
     total += chunk.length;
