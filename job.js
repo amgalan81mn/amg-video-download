@@ -232,6 +232,10 @@ async function hlsDownload(item, title, idx, row) {
       okCount++;
     } catch (e) {
       row.fail(e.message || String(e));
+      // Ар талд жижигрүүлсэн байсан цонхыг гаргаж ирж алдааг харуулна
+      chrome.windows.getCurrent().then((w) => chrome.windows.update(w.id, {
+        state: 'normal', focused: true, width: 460, height: 360,
+      })).catch(() => {});
     }
   }
   const done = document.createElement('p');
@@ -239,5 +243,5 @@ async function hlsDownload(item, title, idx, row) {
   const st = await AMG.getSettings();
   done.textContent = `${okCount}/${job.items.length} дууслаа.` + (st.askLocation ? '' : ` Хавтас: Downloads/${st.folder}`);
   main.append(done);
-  if (okCount === job.items.length) setTimeout(() => window.close(), 4000);
+  if (okCount === job.items.length) setTimeout(() => window.close(), 1000);
 })();

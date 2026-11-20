@@ -112,12 +112,14 @@ function openPicker(params) {
 async function startJob(job) {
   const id = `job_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   await chrome.storage.session.set({ [id]: job });
-  chrome.windows.create({
-    url: chrome.runtime.getURL(`job.html?id=${id}`),
-    type: 'popup',
-    width: 460,
-    height: 360,
-  });
+  // Ажлын цонхыг жижигрүүлсэн (minimized) байдлаар ар талд нээнэ. Дуусахад өөрөө хаагдана,
+  // алдаа гарвал л дэлгэцэнд гарч ирнэ. Явц нь Chrome-ийн таталтын жагсаалт, мэдэгдлээр харагдана.
+  const url = chrome.runtime.getURL(`job.html?id=${id}`);
+  try {
+    await chrome.windows.create({ url, type: 'popup', state: 'minimized', focused: false });
+  } catch (e) {
+    chrome.windows.create({ url, type: 'popup', width: 460, height: 360 });
+  }
 }
 
 // ---------- Гарын товчлол ----------
