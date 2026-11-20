@@ -183,8 +183,15 @@ function makeCheckbox(i, cls) {
   return cb;
 }
 
+// Жижиг зургийн нөөц холбоосууд: тухайн бүлгийн бусад видео (дуутай, бага чанартайг түрүүлж)
+function thumbAlts(g) {
+  return g.variants.map((i) => items[i]).filter((x) => x.kind === 'video')
+    .sort((a, b) => ((a.hasAudio ? 0 : 1) - (b.hasAudio ? 0 : 1)) || ((a.qh || 0) - (b.qh || 0)))
+    .map((x) => x.url);
+}
+
 // Видеоны жижиг зураг: эхний хэсгийг нь харуулна, хулгана аваачихад дуугүй тоглоно
-function makeThumb(it) {
+function makeThumb(it, alts) {
   const box = document.createElement('div');
   box.className = 'thumb';
   if (it.kind === 'audio') { box.textContent = '🎵'; box.classList.add('ph'); return box; }
@@ -205,7 +212,12 @@ function makeThumb(it) {
   v.muted = true;
   v.playsInline = true;
   v.preload = 'metadata';
-  v.src = `${it.url}#t=0.5`;
+  // Ачаалагдахгүй бол (сүлжээ түр тасарсан, кодек гэх мэт) бусад чанарын холбоосыг, дараа нь
+  // эхнийхийг 2 секундын дараа дахин оролдоно.
+  const cands = [it.url].concat((alts || []).filter((u) => u && u !== it.url)).slice(0, 4);
+  let ci = 0;
+  let retried = false;
+  v.src = `${cands[0]}#t=0.5`;
   const dur = document.createElement('span');
   dur.className = 'dur';
   if (it.duration) dur.textContent = fmtDur(it.duration);
@@ -213,7 +225,18 @@ function makeThumb(it) {
     if (!dur.textContent && isFinite(v.duration)) dur.textContent = fmtDur(v.duration);
     box.classList.toggle('wide', v.videoWidth > v.videoHeight);
   });
-  v.addEventListener('error', () => { box.textContent = '🎬'; box.classList.add('ph'); });
+  v.addEventListener('error', () => {
+    if (ci + 1 < cands.length) { ci++; v.src = `${cands[ci]}#t=0.5`; return; }
+    if (!retried) {
+      retried = true;
+      ci = 0;
+      setTimeout(() => { v.src = `${cands[0]}#t=0.5`; }, 2000);
+      return;
+    }
+    box.textContent = '🎬';
+    box.classList.add('ph');
+    box.title = 'Урьдчилан харах зураг ачаалагдсангүй (сүлжээ эсвэл холбоосны хугацаа). Татахад нөлөөлөхгүй байж болно.';
+  });
   box.addEventListener('mouseenter', () => { v.play().catch(() => {}); });
   box.addEventListener('mouseleave', () => { v.pause(); });
   // Зураг дээр дарахад шинэ цонхонд дуутай тоглуулна
@@ -328,8 +351,8 @@ function render() {
 
     li.dataset.base = baseNameOf(it, 'orig');
     // Нуугдсан мөрийн зургийг дэлгэхэд л ачаална
-    if (li.hidden) li.__thumb = () => makeThumb(it);
-    li.append(cb, li.hidden ? document.createElement('span') : makeThumb(it), meta);
+    if (li.hidden) li.__thumb = () => makeThumb(it, thumbAlts(g));
+    li.append(cb, li.hidden ? document.createElement('span') : makeThumb(it, thumbAlts(g)), meta);
     ul.append(li);
   });
   if (others.length) {
