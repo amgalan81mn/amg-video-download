@@ -134,7 +134,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (info.menuItemId === 'amg-media-mp3') {
       startJob({ type: 'mp3', items: [item], title });
     } else {
-      chrome.downloads.download({ url: src, filename: AMG.fileName(title, AMG.guessExt(item)) });
+      AMG.download(src, AMG.fileName(title, AMG.guessExt(item)));
     }
     return;
   }
@@ -153,9 +153,66 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     startJob(msg.job).then(() => reply({ ok: true }));
     return true;
   }
+  if (msg.type === 'download') {
+    // Popup хаагдсан ч таталт үргэлжлэхийн тулд background хийнэ (нэг нэгээр нь)
+    (async () => {
+      for (const d of msg.items) {
+        try { await AMG.download(d.url, d.name); } catch (e) { notifyError(d.name, e.message); }
+      }
+    })();
+    reply({ ok: true });
+    return false;
+  }
   if (msg.type === 'getSniffed') {
     getSniffed(msg.tabId).then((list) => reply(list));
     return true;
   }
   return false;
+});
+
+// ---------- Хадгалсны дараах мэдэгдэл (видео дүрстэй) ----------
+function notifyError(name, reason) {
+  chrome.notifications.create(`err_${Date.now()}`, {
+    type: 'basic',
+    iconUrl: 'icons/video128.png',
+    title: 'Татаж чадсангүй',
+    message: `${name || ''}\n${reason || ''}`.trim(),
+    priority: 1,
+  });
+}
+
+chrome.downloads.onChanged.addListener(async (delta) => {
+  if (!delta.state || delta.state.current === 'in_progress') return;
+  const [d] = await chrome.downloads.search({ id: delta.id });
+  if (!d || d.byExtensionId !== chrome.runtime.id) return;
+  const name = (d.filename || '').split(/[\\/]/).pop();
+  if (delta.state.current === 'complete') {
+    chrome.notifications.create(`dl_${d.id}`, {
+      type: 'basic',
+      iconUrl: 'icons/video128.png',
+      title: 'Хадгаллаа ✓',
+      message: name,
+      contextMessage: d.filename,
+      buttons: [{ title: 'Хавтсанд харах' }, { title: 'Нээх' }],
+      priority: 1,
+    });
+  } else if (delta.state.current === 'interrupted' && d.error !== 'USER_CANCELED') {
+    notifyError(name, `Алдаа: ${d.error || 'тодорхойгүй'}`);
+  }
+});
+
+function dlIdOf(notifId) {
+  return notifId.startsWith('dl_') ? Number(notifId.slice(3)) : null;
+}
+chrome.notifications.onClicked.addListener((nid) => {
+  const id = dlIdOf(nid);
+  if (id != null) chrome.downloads.show(id);
+  chrome.notifications.clear(nid);
+});
+chrome.notifications.onButtonClicked.addListener((nid, btn) => {
+  const id = dlIdOf(nid);
+  if (id == null) return;
+  if (btn === 0) chrome.downloads.show(id);
+  else chrome.downloads.open(id);
+  chrome.notifications.clear(nid);
 });

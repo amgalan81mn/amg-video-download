@@ -41,20 +41,29 @@ async function fetchWithProgress(url, onPct) {
   return out.buffer;
 }
 
-function saveBlob(blob, filename) {
+// Тохиргоонд заасан хавтсанд хадгална. Нэр давхцвал асуух цонх гарна. Цуцалбал false буцаана.
+async function saveBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
-  return new Promise((resolve) => {
-    chrome.downloads.download({ url, filename }, (dlId) => {
-      const listener = (d) => {
-        if (d.id === dlId && d.state && d.state.current !== 'in_progress') {
-          chrome.downloads.onChanged.removeListener(listener);
-          setTimeout(() => URL.revokeObjectURL(url), 2000);
-          resolve();
-        }
-      };
-      chrome.downloads.onChanged.addListener(listener);
+  const dlId = await AMG.download(url, filename);
+  if (dlId == null) {
+    URL.revokeObjectURL(url);
+    return false;
+  }
+  await new Promise((resolve) => {
+    const finish = () => {
+      chrome.downloads.onChanged.removeListener(listener);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      resolve();
+    };
+    const listener = (d) => {
+      if (d.id === dlId && d.state && d.state.current !== 'in_progress') finish();
+    };
+    chrome.downloads.onChanged.addListener(listener);
+    chrome.downloads.search({ id: dlId }).then(([d]) => {
+      if (d && d.state !== 'in_progress') finish();
     });
   });
+  return true;
 }
 
 const sleep0 = () => new Promise((r) => setTimeout(r, 0));
@@ -105,8 +114,8 @@ async function toMp3(item, filename, row) {
   if (end.length) parts.push(new Uint8Array(end));
   row.pct(100);
   row.step('Хадгалж байна…');
-  await saveBlob(new Blob(parts, { type: 'audio/mpeg' }), filename);
-  row.step('Дууслаа ✓');
+  const saved = await saveBlob(new Blob(parts, { type: 'audio/mpeg' }), filename);
+  row.step(saved ? 'Дууслаа ✓' : 'Цуцаллаа');
 }
 
 // ---------- HLS (m3u8) урсгалыг нэг файл болгох ----------
@@ -179,8 +188,8 @@ async function hlsDownload(item, title, idx, row) {
   }
   const ext = init ? 'mp4' : 'ts';
   row.step('Хадгалж байна…');
-  await saveBlob(new Blob(parts, { type: init ? 'video/mp4' : 'video/mp2t' }), AMG.fileName(title, ext, idx));
-  row.step(`Дууслаа ✓ (.${ext} — VLC, Windows Media, MPC зэрэгт тоглоно)`);
+  const saved = await saveBlob(new Blob(parts, { type: init ? 'video/mp4' : 'video/mp2t' }), AMG.fileName(title, ext, idx));
+  row.step(saved ? `Дууслаа ✓ (.${ext} — VLC, Windows Media, MPC зэрэгт тоглоно)` : 'Цуцаллаа');
 }
 
 (async () => {
@@ -208,7 +217,8 @@ async function hlsDownload(item, title, idx, row) {
   }
   const done = document.createElement('p');
   done.className = 'small';
-  done.textContent = `${okCount}/${job.items.length} амжилттай. Файлууд "Downloads/Amg-Video-Download" хавтсанд хадгалагдлаа.`;
+  const st = await AMG.getSettings();
+  done.textContent = `${okCount}/${job.items.length} дууслаа.` + (st.askLocation ? '' : ` Хавтас: Downloads/${st.folder}`);
   main.append(done);
   if (okCount === job.items.length) setTimeout(() => window.close(), 4000);
 })();

@@ -236,10 +236,15 @@ $('downloadBtn').addEventListener('click', async () => {
   });
 
   const multi = sel.length > 1;
-  direct.forEach((it, i) => {
-    const ext = mode === 'mp3' ? 'mp3' : AMG.guessExt(it);
-    chrome.downloads.download({ url: it.url, filename: AMG.fileName(pageTitle, ext, multi ? i + 1 : 0) });
-  });
+  if (direct.length) {
+    await chrome.runtime.sendMessage({
+      type: 'download',
+      items: direct.map((it, i) => ({
+        url: it.url,
+        name: AMG.fileName(pageTitle, mode === 'mp3' ? 'mp3' : AMG.guessExt(it), multi ? i + 1 : 0),
+      })),
+    });
+  }
   if (mp3Jobs.length) await chrome.runtime.sendMessage({ type: 'startJob', job: { type: 'mp3', items: mp3Jobs, title: pageTitle } });
   if (hlsJobs.length) await chrome.runtime.sendMessage({ type: 'startJob', job: { type: 'hls', items: hlsJobs, title: pageTitle } });
 
@@ -250,6 +255,31 @@ $('downloadBtn').addEventListener('click', async () => {
   if (skipped.length) parts.push(`${skipped.length} HLS урсгалыг MP3 болгох боломжгүй`);
   setStatus(parts.join('. ') + '.', !!skipped.length && !parts.length);
 });
+
+// ---------- Тохиргоо (хадгалах хавтас) ----------
+async function loadSettingsUI() {
+  const s = await AMG.getSettings();
+  $('folderInput').value = s.folder;
+  $('askLocation').checked = s.askLocation;
+  $('folderInput').disabled = s.askLocation;
+  $('folderNow').textContent = s.askLocation ? 'Хадгалах бүрт асууна' : `Downloads/${s.folder || ''}`;
+}
+
+async function saveSettingsUI() {
+  await AMG.saveSettings({ folder: $('folderInput').value, askLocation: $('askLocation').checked });
+  await loadSettingsUI();
+  $('savedHint').textContent = 'Хадгаллаа ✓';
+  setTimeout(() => { $('savedHint').textContent = ''; }, 1500);
+}
+
+$('folderInput').addEventListener('change', saveSettingsUI);
+$('askLocation').addEventListener('change', saveSettingsUI);
+$('folderReset').addEventListener('click', () => {
+  $('folderInput').value = AMG.DEFAULT_SETTINGS.folder;
+  $('askLocation').checked = false;
+  saveSettingsUI();
+});
+loadSettingsUI();
 
 // ---------- Эхлэх ----------
 (async () => {

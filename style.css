@@ -54,3 +54,9 @@ body.window #list { max-height: none; }
 footer { padding: 10px 12px; background: #fff; border-top: 1px solid #e5e7eb; }
 .bar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin: 6px 0 12px; }
 .bar > div { height: 100%; width: 0; background: #dc2626; transition: width .2s; }
+.settings { margin-bottom: 8px; }
+.settings summary { cursor: pointer; color: #374151; font-size: 12px; padding: 2px 0 6px; }
+.settings summary b { font-weight: 600; color: #111827; }
+.settings .row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.settings .row input { flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; font: inherit; }
+.settings label { display: flex; gap: 6px; align-items: flex-start; margin-bottom: 4px; }

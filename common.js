@@ -67,15 +67,91 @@ const AMG = (() => {
       .slice(0, max) || 'amg-video';
   }
 
-  function stamp() {
-    const d = new Date();
-    const p = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-  }
-
+  // Зөвхөн файлын нэр (хавтасгүй). Хавтсыг download() тохиргооноос нэмнэ.
   function fileName(title, ext, idx) {
     const suffix = idx ? `-${idx}` : '';
-    return `Amg-Video-Download/${safeName(title)}-${stamp()}${suffix}.${ext}`;
+    return `${safeName(title)}${suffix}.${ext}`;
+  }
+
+  // ---------- Тохиргоо ----------
+  const DEFAULT_SETTINGS = { folder: 'Amg-Video-Download', askLocation: false };
+
+  // "Downloads" доторх дэд хавтасны замыг аюулгүй болгох
+  function cleanFolder(f) {
+    return String(f || '')
+      .split(/[\\/]+/)
+      .map((seg) => seg
+        .replace(/[:*?"<>|\u0000-\u001f]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/^[\s.]+|[\s.]+$/g, '')
+        .slice(0, 60))
+      .filter(Boolean)
+      .join('/');
+  }
+
+  async function getSettings() {
+    const s = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+    return { folder: cleanFolder(s.folder), askLocation: !!s.askLocation };
+  }
+
+  async function saveSettings(s) {
+    await chrome.storage.sync.set({ folder: cleanFolder(s.folder), askLocation: !!s.askLocation });
+  }
+
+  // ---------- Давхардал шалгаж татах ----------
+  function sameEnd(abs, rel) {
+    const a = abs.replace(/\\/g, '/').toLowerCase();
+    const r = '/' + rel.replace(/\\/g, '/').toLowerCase();
+    return a.endsWith(r);
+  }
+
+  async function findExisting(relPath) {
+    const base = relPath.split('/').pop();
+    // search() дуудахад Chrome файл байгаа эсэхийг дахин шалгадаг
+    const found = await chrome.downloads.search({ query: [base], state: 'complete', limit: 200 });
+    return found.find((d) => d.exists !== false && d.filename && sameEnd(d.filename, relPath)) || null;
+  }
+
+  // Нэр давхцвал асуух цонх нээж, хариуг хүлээнэ: 'overwrite' | 'rename' | 'cancel'
+  function askConflict(relPath) {
+    const rid = `c_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    return new Promise((resolve) => {
+      let winId = null;
+      // Хэрэглэгч бодож байх хооронд background service worker унтахаас сэргийлнэ
+      const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);
+      const finish = (ans) => {
+        clearInterval(keepAlive);
+        chrome.runtime.onMessage.removeListener(onMsg);
+        chrome.windows.onRemoved.removeListener(onClose);
+        resolve(ans);
+      };
+      const onMsg = (m) => {
+        if (m && m.type === 'conflictAnswer' && m.rid === rid) finish(m.answer);
+      };
+      const onClose = (id) => { if (id === winId) finish('cancel'); };
+      chrome.runtime.onMessage.addListener(onMsg);
+      chrome.windows.onRemoved.addListener(onClose);
+      const q = new URLSearchParams({ rid, file: relPath }).toString();
+      chrome.windows.create({ url: chrome.runtime.getURL(`confirm.html?${q}`), type: 'popup', width: 440, height: 260, focused: true })
+        .then((w) => { winId = w.id; });
+    });
+  }
+
+  // Бүх таталт энэ функцээр дамжина. Буцаах утга: downloadId эсвэл null (цуцалсан)
+  async function download(url, name) {
+    const s = await getSettings();
+    const rel = s.folder ? `${s.folder}/${name}` : name;
+    if (s.askLocation) {
+      // Chrome-ийн "Save As" цонх сүүлд сонгосон хавтсыг өөрөө санадаг
+      return chrome.downloads.download({ url, filename: rel, saveAs: true });
+    }
+    let conflictAction = 'uniquify';
+    if (await findExisting(rel)) {
+      const ans = await askConflict(rel);
+      if (ans === 'cancel') return null;
+      conflictAction = ans === 'overwrite' ? 'overwrite' : 'uniquify';
+    }
+    return chrome.downloads.download({ url, filename: rel, conflictAction, saveAs: false });
   }
 
   function humanSize(n) {
@@ -135,7 +211,10 @@ const AMG = (() => {
     return { title: document.title, url: location.href, items: out };
   }
 
-  return { classify, cleanUrl, guessExt, fileName, safeName, humanSize, scanPage, extOf };
+  return {
+    classify, cleanUrl, guessExt, fileName, safeName, humanSize, scanPage, extOf,
+    DEFAULT_SETTINGS, cleanFolder, getSettings, saveSettings, download,
+  };
 })();
 
 if (typeof self !== 'undefined') self.AMG = AMG;
