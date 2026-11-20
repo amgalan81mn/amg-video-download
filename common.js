@@ -181,6 +181,9 @@ const AMG = (() => {
         height: el.videoHeight || 0,
         duration: isFinite(el.duration) ? el.duration : 0,
       };
+      if (el.poster) {
+        try { info.poster = new URL(el.poster, location.href).toString(); } catch (e) { /* ignore */ }
+      }
       add(el.currentSrc || el.src, info);
       el.querySelectorAll('source').forEach((s) => add(s.src, Object.assign({}, info, { mime: s.type || '' })));
     });
@@ -208,7 +211,17 @@ const AMG = (() => {
         count++;
       }
     } catch (e) { /* ignore */ }
-    return { title: document.title, url: location.href, items: out };
+    // Жагсаалтын thumbnail-д ашиглах хуудасны ерөнхий зураг
+    let pageThumb = '';
+    const og = document.querySelector('meta[property="og:image"], meta[name="og:image"], meta[name="twitter:image"]');
+    if (og && og.content) {
+      try { pageThumb = new URL(og.content, location.href).toString(); } catch (e) { /* ignore */ }
+    }
+    if (!pageThumb) {
+      const v = [...document.querySelectorAll('video[poster]')].find((x) => x.poster);
+      if (v) pageThumb = v.poster;
+    }
+    return { title: document.title, url: location.href, pageThumb, items: out };
   }
 
   return {
